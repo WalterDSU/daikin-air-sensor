@@ -1,22 +1,22 @@
 esphome:
-  name: daikin-air-sensor
+  name: "daikin-air-sensor"
   project:
     name: "DAIKIN.BRY88AB151K"
-    version: "PM2105" #根据PM2.5传感器型号选择，方便后续OTA查找文件
+    version: "PM2105" #根据自己PM2.5传感器型号选择，方便后续OTA查找文件
     # version: "PM2005"
-  name_add_mac_suffix: true
+  #name_add_mac_suffix: true
   includes:
     - "ze08-ch2o.h"
     - "cm1106.h"
-    - "pm2105i2c.h"  #根据PM2.5传感器型号选择
+    - "pm2105i2c.h"  #根据自己PM2.5传感器型号选择对应的文件
     # - "pm2005.h"
 
 esp32:
   board: nodemcu-32s
 
 wifi: 
-  ssid: 'L' #填写自己的WiFi及密码
-  password: '1234567890'
+  ssid: '123' #填写自己的WiFi及密码
+  password: '8888888888'
   ap:
     ssid: "DAIKIN Fallback Hotspot"
 
@@ -26,7 +26,7 @@ api:
 
 ota:
 
-web_server:
+web_server: #蓝牙代理建议弃用这个服务
   port: 80
 
 logger:
@@ -35,10 +35,13 @@ logger:
     hdc1080: WARN
     sensor: WARN
 
-# bluetooth_proxy:  #需要蓝牙代理功能可以打开
-#   active: true
-
-# esp32_ble_tracker:
+#bluetooth_proxy:  #需要蓝牙代理功能可以打开
+  #active: true
+#esp32_ble_tracker: #需要蓝牙代理功能可以打开
+  #scan_parameters:
+    #interval: 1100ms
+    #window: 1100ms
+    #active: true
 
 uart:
 - id: cm1106_uart
@@ -46,8 +49,8 @@ uart:
   tx_pin: 17
   baud_rate: 9600
 - id: uart_ze08
-  tx_pin: 18
-  rx_pin: 5
+  tx_pin: 5
+  rx_pin: 18
   baud_rate: 9600
 
 i2c:
@@ -70,7 +73,8 @@ sensor:
   name: "DAIKIN CH2O Sensor"
   id: ze08_ch2o
   device_class: volatile_organic_compounds
-  unit_of_measurement: μg/m³
+  unit_of_measurement: µg/m³
+  state_class: "measurement"
   accuracy_decimals: 0
 - platform: custom
   lambda: |-
@@ -82,16 +86,56 @@ sensor:
     id: co2sensor
     device_class: carbon_dioxide
     unit_of_measurement: "ppm"
+    state_class: "measurement"
 - platform: custom
   lambda: |-
-    auto pm25 = new pm2005();
-    App.register_component(pm25);
-    return {pm25};
+    auto pm2105 = new PM2105Sensor(pm25_bus, 0x28, true);
+    App.register_component(pm2105);
+    return {pm2105->pm1p0_sensor, pm2105->pm2p5_sensor, pm2105->pm10_sensor, pm2105->AQI_s, pm2105->AQILevel_s, pm2105->MainPollutedn_s};
   sensors:
-  - name: "DAIKIN PM2.5 Sensor"
-    id: pm25sensor
-    device_class: pm25
-    unit_of_measurement: μg/m³
+    - name: "DAIKIN PM1.0 Sensor"
+      device_class: pm1
+      unit_of_measurement: μg/m³
+      state_class: "measurement"
+    - name: "DAIKIN PM2.5 Sensor"
+      id: pm25
+      device_class: pm25
+      unit_of_measurement: μg/m³
+      state_class: "measurement"
+    - name: "DAIKIN PM10.0 Sensor"
+      device_class: pm10
+      unit_of_measurement: μg/m³
+      state_class: "measurement"
+    - name: "DAIKIN AQI"
+      id: aqi
+    - id: aqilevel
+      #name: "${friendly_name} AQILevel"
+      on_value:
+        then:
+          - lambda: |-  
+              if (x == 5) {
+                id(aqi_cn).publish_state("严重污染");
+              }else if (x == 4) {
+                id(aqi_cn).publish_state("重度污染");
+              }else if (x == 3) {
+                id(aqi_cn).publish_state("中度污染");
+              }else if (x == 2) {
+                id(aqi_cn).publish_state("轻度污染");
+              }else if (x == 1) {
+                id(aqi_cn).publish_state("良");
+              }else if (x == 0) {
+                id(aqi_cn).publish_state("优");
+              }
+    - id: mainpollutedn
+      #name: "${friendly_name} MainPollutedn"
+      on_value:
+        then:
+          - lambda: |-
+              if (x == 1) {
+                id(mainpolluted).publish_state("PM10");
+              } else {
+                id(mainpolluted).publish_state("PM2.5");
+              }  
 - platform: sgp30
   i2c_id: th_bus
   compensation:
@@ -116,7 +160,7 @@ sensor:
           }
 - platform: hdc1080
   i2c_id: th_bus
-  update_interval: 15s
+  update_interval: 10s
   temperature:
     name: "DAIKIN Temperature Sensor"
     id: temperature
@@ -256,7 +300,7 @@ binary_sensor:
   id: pm25lambda
   lambda: |-
     if (id(sleepmode).state == false) {
-      if (id(pm25sensor).state > id(pm25threshold).state) {
+      if (id(pm25).state > id(pm25threshold).state) {
         return true;
       } else {
         return false;
@@ -272,7 +316,7 @@ binary_sensor:
       - switch.turn_off: pm25led
 - platform: template
   internal: true
-  id: co2_calibration
+  id: co2_calibration #CO2持续400ppm并保持5分钟会自动校准
   lambda: |-
     if (id(co2sensor).state == 400) {
       return true;
@@ -280,7 +324,7 @@ binary_sensor:
       return false;
     }
   filters:
-    - delayed_on: 5min #CO2持续400ppm并保持5分钟会自动校准
+    - delayed_on: 5min
   on_press:
     then:
       - switch.turn_on: calibration
@@ -290,7 +334,16 @@ binary_sensor:
   internal: true
   on_press:
     then:
-      - button.press: reset
+      - button.press: reset      
+# - platform: gpio
+#   pin: 34
+#   id: RESET
+#   internal: true
+#   on_press:  #按下背面RESET按钮后CO2指示灯亮，5分钟后将当前环境CO2浓度设置为基准400ppm
+#     then:
+#       - switch.turn_on: co2led
+#       - delay: 5min #可自定义修改时间
+#       - switch.turn_on: calibration
 
 button:
 - platform: restart
@@ -304,3 +357,10 @@ button:
   on_press:
     then:
       - switch.turn_on: calibration
+text_sensor:
+  - platform: template
+    name: "DAIKIN AQI_CN"
+    id: aqi_cn
+  - platform: template
+    name: "DAIKIN MainPolluted"
+    id: mainpolluted         
