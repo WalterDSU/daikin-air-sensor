@@ -34,7 +34,7 @@ logger:
     sgp30: WARN
     hdc1080: WARN
     sensor: WARN
-
+    component: ERROR
 #bluetooth_proxy:  #需要蓝牙代理功能可以打开
   #active: true
 #esp32_ble_tracker: #需要蓝牙代理功能可以打开
@@ -150,13 +150,11 @@ sensor:
     device_class: volatile_organic_compounds
     unit_of_measurement: μg/m³
     filters:
-      - multiply: 3 #系数在2-4.5之间
-      - throttle: 15s #减少传感器在前端更新频率
       - lambda: |-
-          if (x > 10000) {
-            return 10000;
+          if (x * id(tvocmultiply).state > id(tvocmax).state) {
+            return id(tvocmax).state;
           } else {
-            return x;
+            return x * id(tvocmultiply).state;
           }
 - platform: hdc1080
   i2c_id: th_bus
@@ -165,18 +163,14 @@ sensor:
     name: "DAIKIN Temperature Sensor"
     id: temperature
     filters:
-      - offset: -6.0
+      - lambda: return x - id(temperatureoffset).state;
   humidity:
     name: "DAIKIN Humidity Sensor"
     id: humidity
     filters:
-      - multiply: 1.4
-      - lambda: |-
-          if (x > 100) {
-            return 100;
-          } else {
-            return x;
-          }
+      - lambda: return x * id(humiditymultiply).state;
+      - clamp:
+          max_value: 100
 - platform: wifi_signal
   name: "DAIKIN Signal"
 
@@ -234,17 +228,6 @@ number:
   initial_value: 50
   restore_value: true
 - platform: template
-  name: "DAIKIN Threshold TVOC"
-  entity_category: "config"
-  id: tvocthreshold
-  optimistic: true
-  unit_of_measurement: μg/m³
-  min_value: 0
-  max_value: 10000
-  step: 1000
-  initial_value: 1000
-  restore_value: true
-- platform: template
   name: "DAIKIN Threshold CH2O"
   entity_category: "config"
   id: ch2othreshold
@@ -254,6 +237,58 @@ number:
   max_value: 200
   step: 10
   initial_value: 100
+  restore_value: true
+- platform: template
+  name: "DAIKIN Threshold TVOC"
+  entity_category: "config"
+  id: tvocthreshold
+  optimistic: true
+  unit_of_measurement: μg/m³
+  min_value: 0
+  max_value: 50000
+  step: 1000
+  initial_value: 1000
+  restore_value: true
+- platform: template
+  name: "DAIKIN TVOC MAX"
+  entity_category: "config"
+  id: tvocmax
+  optimistic: true
+  unit_of_measurement: μg/m³
+  min_value: 5000
+  max_value: 50000
+  step: 1000
+  initial_value: 10000
+  restore_value: true
+- platform: template
+  name: "DAIKIN TVOC Multiply"
+  entity_category: "config"
+  id: tvocmultiply
+  optimistic: true
+  min_value: 1
+  max_value: 5
+  step: 0.1
+  initial_value: 3
+  restore_value: true
+- platform: template
+  name: "DAIKIN Humidity Multiply"
+  entity_category: "config"
+  id: humiditymultiply
+  optimistic: true
+  min_value: 1
+  max_value: 1.6
+  step: 0.01
+  initial_value: 1.4
+  restore_value: true
+- platform: template
+  name: "DAIKIN Temperature Offset"
+  entity_category: "config"
+  id: temperatureoffset
+  optimistic: true
+  min_value: 0
+  max_value: 10
+  step: 0.1
+  initial_value: 6
   restore_value: true
 
 binary_sensor:
@@ -316,7 +351,7 @@ binary_sensor:
       - switch.turn_off: pm25led
 - platform: template
   internal: true
-  id: co2_calibration #CO2持续400ppm并保持5分钟会自动校准
+  id: co2_calibration
   lambda: |-
     if (id(co2sensor).state == 400) {
       return true;
@@ -324,7 +359,7 @@ binary_sensor:
       return false;
     }
   filters:
-    - delayed_on: 5min
+    - delayed_on: 5min #CO2持续400ppm并保持5分钟会自动校准
   on_press:
     then:
       - switch.turn_on: calibration
@@ -334,7 +369,7 @@ binary_sensor:
   internal: true
   on_press:
     then:
-      - button.press: reset      
+      - button.press: reset
 # - platform: gpio
 #   pin: 34
 #   id: RESET
@@ -348,12 +383,13 @@ binary_sensor:
 button:
 - platform: restart
   name: "DAIKIN Restart"
+  entity_category: "diagnostic"
 - platform: factory_reset
   id: reset
   internal: true
 - platform: template
   name: "DAIKIN CO2 Calibration" #按下后会将当前环境CO2浓度设置为基准400ppm，按下时请确保放入室外或此时CO2浓度足够低
-  entity_category: "config"
+  entity_category: "diagnostic"
   on_press:
     then:
       - switch.turn_on: calibration
@@ -364,3 +400,10 @@ text_sensor:
   - platform: template
     name: "DAIKIN MainPolluted"
     id: mainpolluted         
+# - platform: template
+#   name: "DAIKIN CH2O ACTIVE" #按下后打开甲醛传感器主动上报模式，仅用于插回原厂固件机器上，ESPHome无法继续解析数据，重启ESPHome后自动打开问答模式
+#   entity_category: "diagnostic"
+#   on_press:
+#     - uart.write: 
+#         id: uart_ze08
+#         data: [0xFF, 0x01, 0x78, 0x40, 0x00, 0x00, 0x00, 0x00, 0x47]
