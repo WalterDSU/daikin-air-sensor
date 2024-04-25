@@ -176,9 +176,10 @@ sensor:
 
 switch:
 - platform: template
-  name: "DAIKIN Sleep Mode"
-  icon: mdi:sleep
-  id: sleepmode
+  name: "DAIKIN LED Indicator"
+  restore_mode: RESTORE_DEFAULT_OFF
+  icon: mdi:led-off
+  id: indicator
   optimistic: true
 - platform: custom
   lambda: |-
@@ -296,7 +297,7 @@ binary_sensor:
   internal: true
   id: tvocch2olambda
   lambda: |-
-    if (id(sleepmode).state == false) {
+    if (id(indicator).state == true) {
       if (id(ze08_ch2o).state > id(ch2othreshold).state || id(tvocsensor).state > id(tvocthreshold).state) {
         return true;
       } else {
@@ -315,7 +316,7 @@ binary_sensor:
   internal: true
   id: co2lambda
   lambda: |-
-    if (id(sleepmode).state == false) {
+    if (id(indicator).state == true) {
       if (id(co2sensor).state > id(co2threshold).state) {
         return true;
       } else {
@@ -334,7 +335,7 @@ binary_sensor:
   internal: true
   id: pm25lambda
   lambda: |-
-    if (id(sleepmode).state == false) {
+    if (id(indicator).state == true) {
       if (id(pm25).state > id(pm25threshold).state) {
         return true;
       } else {
